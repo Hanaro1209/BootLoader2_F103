@@ -129,25 +129,31 @@ void jump_to_application(uint32_t app_address)
   p_function p_jump_to_app;
 
   // 1. 부트로더에서 사용한 모든 주변 장치들을 비활성화합니다.
+  // 이는 해당 주변장치의 클럭을 끄고, 인터럽트를 비활성화하는 등의 작업을 포함합니다.
   HAL_UART_DeInit(&huart2);
   HAL_GPIO_DeInit(LD2_GPIO_Port, LD2_Pin);
   HAL_GPIO_DeInit(B1_GPIO_Port, B1_Pin);
-  HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
 
-  // 2. 모든 인터럽트를 비활성화합니다.
-  __disable_irq();
-
-  // 3. HAL 및 Systick을 비활성화합니다.
+  // 2. HAL 라이브러리를 DeInit하고 Systick을 중지합니다.
+  // 이 함수는 Systick 인터럽트를 비활성화하고 uwTick 변수를 0으로 초기화합니다.
   HAL_DeInit();
 
-  // 4. 벡터 테이블 오프셋 레지스터(VTOR)를 애플리케이션의 벡터 테이블 주소로
-  // 설정합니다.
+  // 3. RCC(Reset and Clock Control)를 초기 상태로 되돌립니다.
+  // 이렇게 하면 애플리케이션이 마치 리셋 직후처럼 깨끗한 클럭 설정에서 시작할 수 있습니다.
+  // HSI가 활성화되고, PLL은 비활성화됩니다.
+  HAL_RCC_DeInit();
+
+  // 4. Cortex-M 코어의 모든 마스크 가능한 인터럽트를 비활성화합니다.
+  // 이는 애플리케이션으로 점프하기 전 예기치 않은 인터럽트 발생을 방지하는 가장 확실한 방법입니다.
+  __disable_irq();
+
+  // 5. 벡터 테이블 오프셋 레지스터(VTOR)를 애플리케이션의 벡터 테이블 주소로 설정합니다.
   SCB->VTOR = app_address;
 
-  // 5. 메인 스택 포인터(MSP)를 설정합니다.
+  // 6. 메인 스택 포인터(MSP)를 애플리케이션의 초기 스택 포인터로 설정합니다.
   __set_MSP(*(__IO uint32_t *)app_address);
 
-  // 6. 애플리케이션의 리셋 핸들러 주소를 가져와 점프합니다.
+  // 7. 애플리케이션의 리셋 핸들러 주소를 가져와 점프합니다.
   p_jump_to_app = (p_function)(*(__IO uint32_t *)(app_address + 4));
   p_jump_to_app();
 
@@ -229,6 +235,7 @@ int main(void)
     {
       // 사용자가 선택한 앱으로 부팅
       app_to_boot = boot_cmd - '0';
+      printf("User input '%c', selecting App %d to boot.\r\n", boot_cmd, app_to_boot);
     }
   }
 
@@ -242,12 +249,15 @@ int main(void)
   switch (app_to_boot)
   {
   case 1:
+    printf("Selected App 1. Address: 0x%08lX\r\n", APP1_START_ADDRESS);
     app_address_to_boot = APP1_START_ADDRESS;
     break;
   case 2:
+    printf("Selected App 2. Address: 0x%08lX\r\n", APP2_START_ADDRESS);
     app_address_to_boot = APP2_START_ADDRESS;
     break;
   case 3:
+    printf("Selected App 3. Address: 0x%08lX\r\n", APP3_START_ADDRESS);
     app_address_to_boot = APP3_START_ADDRESS;
     break;
   default:
