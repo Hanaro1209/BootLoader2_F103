@@ -34,17 +34,18 @@ typedef void (*p_function)(void);
 /* USER CODE BEGIN PD */
 // 메모리 맵 정의 (STM32F103CB 128KB 플래시 기준)
 // Flash Page Size는 1KB 입니다.
-#define FLASH_PAGE_SIZE 0x400 // 1KB
-#define BOOTLOADER_START_ADDRESS \
-  0x08000000 // 부트로더: 16KB (0x08000000 - 0x08003FFF)
-#define APP1_START_ADDRESS \
-  0x08004000 // 애플리케이션 1: 32KB (0x08004000 - 0x0800BFFF)
-#define APP2_START_ADDRESS \
-  0x0800C000 // 애플리케이션 2: 32KB (0x0800C000 - 0x08013FFF)
-#define APP3_START_ADDRESS 0x08014000 // 애플리케이션 3: 32KB (0x08014000 - 0x0801BFFF)
+#define FLASH_PAGE_SIZE          0x400  // 1KB
 
-// 부팅할 앱 선택 정보를 저장하는 공유 데이터 페이지 (Flash의 마지막 페이지
-// 사용)
+// 부트로더: 16KB (0x08000000 - 0x08003FFF)
+#define BOOTLOADER_START_ADDRESS 0x08000000
+// 애플리케이션 1: 32KB (0x08004000 - 0x0800BFFF)
+#define APP1_START_ADDRESS       0x08004000
+// 애플리케이션 2: 32KB (0x0800C000 - 0x08013FFF)
+#define APP2_START_ADDRESS       0x0800C000
+// 애플리케이션 3: 32KB (0x08014000 - 0x0801BFFF)
+#define APP3_START_ADDRESS       0x08014000
+
+// 부팅할 앱 선택 정보를 저장하는 공유 데이터 페이지 (Flash의 마지막 페이지 사용)
 #define SHARED_DATA_PAGE_ADDRESS 0x0801FC00
 
 // 애플리케이션 유효성 검사
@@ -53,7 +54,6 @@ typedef void (*p_function)(void);
 #define SRAM_START 0x20000000
 #define SRAM_SIZE (20 * 1024)
 #define SRAM_END (SRAM_START + SRAM_SIZE)
-/* USER CODE END PD */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -112,7 +112,7 @@ PUTCHAR_PROTOTYPE
 uint8_t check_for_application(uint32_t app_address)
 {
   uint32_t stack_pointer = *(__IO uint32_t *)app_address;
-  if (stack_pointer >= SRAM_START && stack_pointer < SRAM_END)
+  if (stack_pointer > SRAM_START && stack_pointer <= SRAM_END)
   {
     return 1; // 유효한 스택 포인터
   }
@@ -212,55 +212,61 @@ int main(void)
   uint8_t boot_cmd = 0;
   HAL_StatusTypeDef status;
 
-  printf("Send 'b' within 2 seconds to enter bootloader mode.\r\n");
+  printf("Send '1'-'3' to boot app, or 'b' for bootloader mode (10s timeout).\r\n");
 
   // 2초 동안 'b' 명령어를 기다립니다.
-  status = HAL_UART_Receive(&huart2, &boot_cmd, 1, 2000);
+  status = HAL_UART_Receive(&huart2, &boot_cmd, 1, 10000);
 
-  if (status == HAL_OK && boot_cmd == 'b')
+  if (status == HAL_OK)
   {
-    // 부트로더 모드로 진입
-    printf("Entering bootloader mode.\r\n");
-    bootloader_uart_handler(); // 이 함수는 무한 루프입니다.
+    if (boot_cmd == 'b')
+    {
+      // 부트로더 모드로 진입
+      printf("Entering bootloader mode.\r\n");
+      bootloader_uart_handler(); // 이 함수는 무한 루프입니다.
+    }
+    else if ((boot_cmd >= '1') && (boot_cmd <= '3'))
+    {
+      // 사용자가 선택한 앱으로 부팅
+      app_to_boot = boot_cmd - '0';
+    }
+  }
+
+  // 기본 부팅 절차 (타임아웃 또는 유효하지 않은 입력 시 기본 앱으로 부팅)
+  printf("Attempting to boot application...\r\n");
+  // TODO: 공유 메모리에서 어떤 앱을 부팅할지 읽어오는
+  // 로직(get_boot_app_number)을 구현해야 합니다. app_to_boot =
+  // get_boot_app_number();
+  printf("Boot choice: App %d\r\n", app_to_boot);
+
+  switch (app_to_boot)
+  {
+  case 1:
+    app_address_to_boot = APP1_START_ADDRESS;
+    break;
+  case 2:
+    app_address_to_boot = APP2_START_ADDRESS;
+    break;
+  case 3:
+    app_address_to_boot = APP3_START_ADDRESS;
+    break;
+  default:
+    app_address_to_boot = 0;
+    break; // 발생하면 안됨
+  }
+
+  if (app_address_to_boot != 0 &&
+      check_for_application(app_address_to_boot))
+  {
+    printf("Valid application found. Jumping to 0x%08lX\r\n",
+           app_address_to_boot);
+    jump_to_application(app_address_to_boot);
   }
   else
   {
-    // 기본 부팅 절차
-    printf("Attempting to boot application...\r\n");
-    // TODO: 공유 메모리에서 어떤 앱을 부팅할지 읽어오는
-    // 로직(get_boot_app_number)을 구현해야 합니다. app_to_boot =
-    // get_boot_app_number();
-    printf("Boot choice: App %d\r\n", app_to_boot);
-
-    switch (app_to_boot)
-    {
-    case 1:
-      app_address_to_boot = APP1_START_ADDRESS;
-      break;
-    case 2:
-      app_address_to_boot = APP2_START_ADDRESS;
-      break;
-    case 3:
-      app_address_to_boot = APP3_START_ADDRESS;
-      break;
-    default:
-      app_address_to_boot = 0;
-      break; // 발생하면 안됨
-    }
-
-    if (app_address_to_boot != 0 &&
-        check_for_application(app_address_to_boot))
-    {
-      printf("Valid application found. Jumping to 0x%08lX\r\n",
-             app_address_to_boot);
-      jump_to_application(app_address_to_boot);
-    }
-    else
-    {
-      printf("No valid application found at selected slot. Entering bootloader "
-             "mode.\r\n");
-      bootloader_uart_handler(); // 이 함수는 무한 루프입니다.
-    }
+    printf("No valid application found at selected slot. Entering bootloader "
+           "mode.\r\n");
+    bootloader_uart_handler(); // 이 함수는 무한 루프입니다.
   }
   /* USER CODE END 2 */
 
